@@ -378,12 +378,15 @@ def fast_inbox_leaderboard(cl: Client):
     console.print(" [1] Quick Scan    (Top 10 chats, 50 msgs each)")
     console.print(" [2] Standard Scan (Top 20 chats, 150 msgs each)")
     console.print(" [3] Deep Scan     (Top 30 chats, 300 msgs each)")
-    lb_choice = Prompt.ask("Select scan scope", choices=["1", "2", "3"], default="2").strip()
+    console.print(" [4] ALL Messages  (Total History from Day 1 Across ALL Chats) 🚀")
+    lb_choice = Prompt.ask("Select scan scope", choices=["1", "2", "3", "4"], default="2").strip()
 
+    scan_all = (lb_choice == "4")
     scope_map = {
         "1": (10, 50),
         "2": (20, 150),
-        "3": (30, 300)
+        "3": (30, 300),
+        "4": (35, None)
     }
     thread_count, msgs_per_thread = scope_map.get(lb_choice, (20, 150))
 
@@ -396,6 +399,7 @@ def fast_inbox_leaderboard(cl: Client):
             return
 
     results = []
+    interrupted = False
 
     with Progress(
         SpinnerColumn(),
@@ -406,45 +410,58 @@ def fast_inbox_leaderboard(cl: Client):
     ) as progress:
         overall_task = progress.add_task("Evaluating threads", total=len(threads))
 
-        for t in threads:
-            t_id = t.get("thread_id")
-            title = get_thread_display_name(t)
-            sent = 0
-            rcvd = 0
-            scanned = 0
-            cursor = None
+        try:
+            for i, t in enumerate(threads, 1):
+                t_id = t.get("thread_id")
+                title = get_thread_display_name(t)
+                sent = 0
+                rcvd = 0
+                scanned = 0
+                cursor = None
 
-            try:
-                while scanned < msgs_per_thread:
-                    batch = min(100, msgs_per_thread - scanned)
-                    url = f"direct_v2/threads/{t_id}/?limit={batch}"
-                    if cursor:
-                        url += f"&cursor={cursor}"
-                    res = cl.private_request(url)
-                    th = res.get("thread", {})
-                    items = th.get("items", [])
-                    if not items:
-                        break
+                progress.update(overall_task, description=f"[{i}/{len(threads)}] {title}")
 
-                    for item in items:
-                        scanned += 1
-                        if is_reel(item):
-                            if str(item.get("user_id", "")) == my_pk:
-                                sent += 1
-                            else:
-                                rcvd += 1
+                try:
+                    while True:
+                        if msgs_per_thread and scanned >= msgs_per_thread:
+                            break
+                        batch = 100 if scan_all else min(100, msgs_per_thread - scanned)
+                        url = f"direct_v2/threads/{t_id}/?limit={batch}"
+                        if cursor:
+                            url += f"&cursor={cursor}"
+                        res = cl.private_request(url)
+                        th = res.get("thread", {})
+                        items = th.get("items", [])
+                        if not items:
+                            break
 
-                    cursor = th.get("oldest_cursor")
-                    if not cursor or not th.get("has_older"):
-                        break
-                    time.sleep(0.15)
-            except Exception:
-                pass
+                        for item in items:
+                            scanned += 1
+                            if is_reel(item):
+                                if str(item.get("user_id", "")) == my_pk:
+                                    sent += 1
+                                else:
+                                    rcvd += 1
 
-            total = sent + rcvd
-            if total > 0:
-                results.append({"title": title, "total": total, "sent": sent, "rcvd": rcvd})
-            progress.advance(overall_task)
+                        progress.update(
+                            overall_task,
+                            description=f"[{i}/{len(threads)}] {title} ({scanned:,} msgs | {sent+rcvd:,} reels)"
+                        )
+
+                        cursor = th.get("oldest_cursor")
+                        if not cursor or not th.get("has_older"):
+                            break
+                        time.sleep(0.18)
+                except Exception:
+                    pass
+
+                total = sent + rcvd
+                if total > 0:
+                    results.append({"title": title, "total": total, "sent": sent, "rcvd": rcvd})
+                progress.advance(overall_task)
+        except (KeyboardInterrupt, EOFError):
+            interrupted = True
+            console.print("\n[yellow][!] Inbox scan paused by user. Compiling leaderboard with data collected so far...[/yellow]")
 
     results.sort(key=lambda x: x["total"], reverse=True)
 
