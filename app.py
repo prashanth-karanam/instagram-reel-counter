@@ -53,6 +53,7 @@ console = Console()
 # ---------------------------------------------------------
 TOOLKIT_DIR = Path.home() / ".ig_toolkit"
 SESSION_FILE = TOOLKIT_DIR / "session.json"
+USER_FILE = TOOLKIT_DIR / "user.txt"
 CACHE_DIR = TOOLKIT_DIR / "cache"
 
 TOOLKIT_DIR.mkdir(parents=True, exist_ok=True)
@@ -66,29 +67,27 @@ def get_instagram_client() -> Client:
     # Enforce native WinSock requests transport to eliminate curl_cffi DNS crash on Windows
     cl.private_transport = "requests"
     cl.public_transport = "requests"
-    cl.request_timeout = 20
+    cl.request_timeout = 0
     return cl
 
 
-def login_flow() -> Client:
+def login_flow():
     cl = get_instagram_client()
 
     # 1. Existing local session check
     if SESSION_FILE.exists():
         try:
             cl.load_settings(SESSION_FILE)
-            cl.login_by_sessionid(cl.sessionid)
-            cl.get_timeline_feed()
-            return cl
+            cl.request_timeout = 0
+            cached_user = USER_FILE.read_text(encoding="utf-8").strip() if USER_FILE.exists() else None
+            return cl, cached_user or f"User_{cl.user_id}"
         except LoginRequired:
             console.print("[yellow]Saved session expired. Re-authentication required.[/yellow]")
-            try:
-                SESSION_FILE.unlink(missing_ok=True)
-            except Exception:
-                pass
+            SESSION_FILE.unlink(missing_ok=True)
+            USER_FILE.unlink(missing_ok=True)
         except Exception as e:
-            console.print(f"[dim yellow]Connection notice ({e}). Continuing with cached credentials...[/dim yellow]")
-            return cl
+            cached_user = USER_FILE.read_text(encoding="utf-8").strip() if USER_FILE.exists() else None
+            return cl, cached_user or f"User_{cl.user_id}"
 
     # 2. Transparent authentication notice
     console.print(
@@ -126,18 +125,26 @@ def login_flow() -> Client:
             console.print(f"[bold red]Login failed: {e}[/bold red]")
             sys.exit(1)
 
+    cl.request_timeout = 0
     cl.dump_settings(SESSION_FILE)
+    try:
+        USER_FILE.write_text(username, encoding="utf-8")
+    except Exception:
+        pass
     console.print(f"[bold green]Connected as @{username}[/bold green]\n")
-    return cl
+    return cl, username
 
 
 def logout_account():
     if Confirm.ask("[bold red]Clear saved session from this machine?[/bold red]"):
         try:
             SESSION_FILE.unlink(missing_ok=True)
+            USER_FILE.unlink(missing_ok=True)
             console.print("[bold green]Session cleared.[/bold green]")
         except Exception as e:
             console.print(f"[red]Error removing file: {e}[/red]")
+        time.sleep(1)
+        sys.exit(0)
         time.sleep(1)
         sys.exit(0)
 
@@ -538,13 +545,8 @@ def friend_activity_radar(cl: Client):
 # Application Entrypoint
 # ---------------------------------------------------------
 def main():
-    cl = login_flow()
-
-    try:
-        acc = cl.account_info()
-        user_label = f"@{acc.username}"
-    except Exception:
-        user_label = "Authenticated"
+    cl, username = login_flow()
+    user_label = f"@{username}" if not username.startswith("@") else username
 
     while True:
         console.clear()
