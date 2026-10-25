@@ -1,6 +1,6 @@
-# Instagram Reel Counter & Local Telemetry Toolkit
+# Instagram Reel Counter
 
-A high-performance, local-first terminal engine designed to analyze Instagram Direct message activity, calculate bidirectional Reel exchange metrics, and inspect conversation streams without dispatching read receipts.
+A local-first terminal engine to audit your Instagram DM habits, calculate who spams more Reels, and inspect conversations in ghost mode without triggering seen receipts.
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
@@ -14,59 +14,75 @@ A high-performance, local-first terminal engine designed to analyze Instagram Di
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Engineering Principles
+### Why This Exists
 
-1. Local-First Security Model
-All credentials, session tokens, and cached metadata remain strictly inside the host machine at `~/.ig_toolkit/session.json`. Network calls interface directly with Instagram endpoints without intermediary proxies or telemetry collection.
+We all have friends where 90% of the conversation is just sharing Instagram Reels. Yet Instagram gives you zero data on how you actually interact.
 
-2. Ghost-Mode Protocol
-Standard Instagram mobile and web applications trigger a `direct_v2/threads/{id}/items/{id}/seen/` mutation whenever a conversation is loaded. This engine issues read-only queries against `direct_v2/threads/{id}/`, allowing complete transcript inspection while preserving unread states.
+You never get clear answers to the questions you actually wonder about:
 
-3. Resilient Transport Layer
-Windows environments frequently encounter host resolution failures when invoking libcurl bindings via `curl_cffi`. The client forces a dedicated WinSock `requests` transport adapter with exponential backoff and controlled batch pacing (250ms delay) to prevent automated request throttling.
+1. Who is really carrying the conversation and sending more reels?
+2. What ungodly hours of the night are you both trading clips?
+3. Did your friend genuinely miss your message, or were they active in five other chats while leaving yours on delivered?
 
-4. Precise Media Classification
-Reel extraction relies on strict URI path matching (`/reel/`, `/reels/`) and cross-app media attribute parsing (`xma_clip`, `clips_metadata`, `felix_share`). Static photo posts, carousels, and stories are filtered out during stream ingestion.
+Most third-party Instagram tools online are sketchy web apps that demand your password, route your traffic through unknown cloud servers, and risk account checkpoints.
 
-### Capabilities
+We built this tool to be the exact opposite. It runs 100% locally on your machine, talks directly to Instagram's official API, and never sends your data anywhere.
 
-1. Bidirectional Reel Analytics
-Computes sent versus received totals across any thread with visual percentage distribution bars, sharing ratios, and a 24-hour diurnal activity heatmap.
+### What It Does
 
-2. Parallel Inbox Ranking
-Scans active threads to build a leaderboard of top reel exchange partners.
+1. The Reel Scorecard
+Scans your chat history and gives you the exact numbers. You get the total reel count, sent versus received ratio, percentage bars, and a verdict on who spams more.
 
-3. Read Receipt Telemetry
-Cross-references outgoing delivery timestamps with participant receipt cursors to verify whether messages have been opened.
+2. Peak Activity Heatmap
+Analyzes the timestamps of every shared reel across a 24-hour clock to show your peak sharing hours and late-night habits.
+
+3. Inbox Leaderboard
+Scans your active conversations in parallel and ranks your top friends by total reel volume.
+
+4. 100% Ghost Mode Reader
+Lets you read conversation transcripts and grab direct links to shared reels without triggering "Seen" receipts. On the sender's phone, your status stays as "Delivered".
+
+5. Delivery and Activity Telemetry
+Checks outgoing message timestamps against your friend's read cursors to detect when someone is active elsewhere while leaving your chat unread.
+
+### Privacy and Security Model
+
+1. Local Credentials
+Your login credentials and session cookies are stored strictly in your own operating system user directory at `~/.ig_toolkit/session.json`.
+
+2. Direct Connection
+Network traffic travels directly between your machine and Meta's servers over TLS 1.3. No middleman servers, no proxy relays, and zero telemetry tracking.
+
+3. Windows Socket Stability
+Forces a dedicated WinSock requests transport with 250ms batch pacing to eliminate the common DNS resolution crashes caused by libcurl on Windows.
 
 ### Technical Specifications
 
 ```
 Runtime:         Python 3.10+
 Transport:       Native WinSock Requests (HTTPS / TLS 1.3)
-Rate Pacing:     250ms batch intervals
-Session Storage: Local JSON (Home Directory Sandbox)
+Batch Pacing:    250ms rate limit buffer
+Session Path:    ~/.ig_toolkit/session.json
 Interface:       Rich Terminal Engine (UTF-8 ANSI)
 License:         MIT
 ```
 
-### Setup & Execution
+### Setup and Running
 
 Install dependencies:
 ```bash
 pip install instagrapi rich requests
 ```
 
-Windows Launcher:
+Windows:
+Double-click `run.bat` or run:
 ```cmd
-run.bat
-```
-
-Manual Execution:
-```bash
 python app.py
 ```
 
-### Session Lifecycle
+Linux or macOS:
+```bash
+python3 app.py
+```
 
-Saved sessions automatically authenticate subsequent runs without requiring re-entry of credentials. Sessions can be purged at any time by selecting option 5 in the menu or removing `~/.ig_toolkit/session.json`.
+To switch accounts or clear saved credentials, select option 5 in the menu or delete `~/.ig_toolkit/session.json`.
