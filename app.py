@@ -253,68 +253,84 @@ def fast_single_chat_counter(cl: Client):
     thread_id = str(selected_thread.get("thread_id"))
     chat_title = get_thread_display_name(selected_thread)
 
-    console.print("\nDepth:")
-    console.print(" [1] 100 messages (Fast)")
-    console.print(" [2] 500 messages (Standard)")
+    console.print("\nScan Depth:")
+    console.print(" [1] 100 messages   (Fast)")
+    console.print(" [2] 500 messages   (Standard)")
     console.print(" [3] 1,500 messages (Deep)")
-    depth_choice = Prompt.ask("Select depth", default="2").strip()
+    console.print(" [4] ALL Messages   (Total Conversation History from Day 1) 🚀")
+    depth_choice = Prompt.ask("Select depth", choices=["1", "2", "3", "4"], default="4").strip()
 
+    scan_all = (depth_choice == "4")
     limit_map = {"1": 100, "2": 500, "3": 1500}
-    max_amount = limit_map.get(depth_choice, 500)
+    max_amount = None if scan_all else limit_map.get(depth_choice, 500)
 
     reels_sent = 0
     reels_rcvd = 0
     hourly_distribution = defaultdict(int)
     total_messages = 0
 
+    interrupted = False
     with Progress(
         SpinnerColumn(),
         TextColumn("[bold cyan]{task.description}[/bold cyan]"),
-        BarColumn(),
-        TaskProgressColumn(),
+        BarColumn() if not scan_all else TextColumn(""),
+        TaskProgressColumn() if not scan_all else TextColumn(""),
         console=console
     ) as progress:
         task = progress.add_task(f"Scanning {chat_title}", total=max_amount)
         cursor = None
 
-        while total_messages < max_amount:
-            batch_size = min(100, max_amount - total_messages)
-            url = f"direct_v2/threads/{thread_id}/?limit={batch_size}"
-            if cursor:
-                url += f"&cursor={cursor}"
-
-            try:
-                res = cl.private_request(url)
-                th = res.get("thread", {})
-                items = th.get("items", [])
-                if not items:
+        try:
+            while True:
+                if max_amount and total_messages >= max_amount:
                     break
+                batch_size = 100 if scan_all else min(100, max_amount - total_messages)
+                url = f"direct_v2/threads/{thread_id}/?limit={batch_size}"
+                if cursor:
+                    url += f"&cursor={cursor}"
 
-                for item in items:
-                    total_messages += 1
-                    sender_id = str(item.get("user_id", ""))
-                    is_me = (sender_id == my_pk)
-                    ts = parse_timestamp(item.get("timestamp", 0))
+                try:
+                    res = cl.private_request(url)
+                    th = res.get("thread", {})
+                    items = th.get("items", [])
+                    if not items:
+                        break
 
-                    if is_reel(item):
-                        if is_me:
-                            reels_sent += 1
-                        else:
-                            reels_rcvd += 1
-                        hourly_distribution[ts.hour] += 1
+                    for item in items:
+                        total_messages += 1
+                        sender_id = str(item.get("user_id", ""))
+                        is_me = (sender_id == my_pk)
+                        ts = parse_timestamp(item.get("timestamp", 0))
 
-                progress.update(task, completed=total_messages)
-                cursor = th.get("oldest_cursor")
-                if not cursor or not th.get("has_older"):
+                        if is_reel(item):
+                            if is_me:
+                                reels_sent += 1
+                            else:
+                                reels_rcvd += 1
+                            hourly_distribution[ts.hour] += 1
+
+                    if scan_all:
+                        progress.update(
+                            task,
+                            description=f"Scanning {chat_title} ({total_messages:,} msgs | {reels_sent + reels_rcvd:,} reels found)"
+                        )
+                    else:
+                        progress.update(task, completed=total_messages)
+
+                    cursor = th.get("oldest_cursor")
+                    if not cursor or not th.get("has_older"):
+                        break
+                    time.sleep(0.2)
+                except Exception as e:
+                    console.print(f"[dim yellow]Warning: {e}[/dim yellow]")
                     break
-                # Controlled pacing to prevent API throttling
-                time.sleep(0.25)
-            except Exception as e:
-                console.print(f"[dim yellow]Warning: {e}[/dim yellow]")
-                break
+        except (KeyboardInterrupt, EOFError):
+            interrupted = True
+            console.print("\n[yellow][!] Scan paused by user. Showing results scanned so far...[/yellow]")
 
     total_reels = reels_sent + reels_rcvd
-    console.print(f"\n[bold green]Scan finished. {total_messages:,} messages parsed.[/bold green]\n")
+    status_label = "Complete history parsed" if (scan_all and not interrupted) else "Scan finished"
+    console.print(f"\n[bold green]✔ {status_label}: {total_messages:,} messages checked ({total_reels:,} reels found)![/bold green]\n")
 
     sent_ratio = (reels_sent / total_reels) if total_reels > 0 else 0.5
     rcvd_ratio = 1.0 - sent_ratio
@@ -358,11 +374,22 @@ def fast_single_chat_counter(cl: Client):
 # ---------------------------------------------------------
 def fast_inbox_leaderboard(cl: Client):
     my_pk = str(cl.user_id)
-    console.print("\n[bold cyan]Scanning top inbox threads...[/bold cyan]")
+    console.print("\n[bold cyan]Inbox Leaderboard Scope:[/bold cyan]")
+    console.print(" [1] Quick Scan    (Top 10 chats, 50 msgs each)")
+    console.print(" [2] Standard Scan (Top 20 chats, 150 msgs each)")
+    console.print(" [3] Deep Scan     (Top 30 chats, 300 msgs each)")
+    lb_choice = Prompt.ask("Select scan scope", choices=["1", "2", "3"], default="2").strip()
 
-    with console.status("Querying inbox...", spinner="dots"):
+    scope_map = {
+        "1": (10, 50),
+        "2": (20, 150),
+        "3": (30, 300)
+    }
+    thread_count, msgs_per_thread = scope_map.get(lb_choice, (20, 150))
+
+    with console.status("Querying inbox threads...", spinner="dots"):
         try:
-            inbox = cl.private_request("direct_v2/inbox/?limit=20")
+            inbox = cl.private_request(f"direct_v2/inbox/?limit={thread_count}")
             threads = inbox.get("inbox", {}).get("threads", [])
         except Exception as e:
             console.print(f"[red]Inbox load error: {e}[/red]")
@@ -384,17 +411,33 @@ def fast_inbox_leaderboard(cl: Client):
             title = get_thread_display_name(t)
             sent = 0
             rcvd = 0
+            scanned = 0
+            cursor = None
 
             try:
-                res = cl.private_request(f"direct_v2/threads/{t_id}/?limit=80")
-                items = res.get("thread", {}).get("items", [])
-                for item in items:
-                    if is_reel(item):
-                        if str(item.get("user_id", "")) == my_pk:
-                            sent += 1
-                        else:
-                            rcvd += 1
-                time.sleep(0.15)
+                while scanned < msgs_per_thread:
+                    batch = min(100, msgs_per_thread - scanned)
+                    url = f"direct_v2/threads/{t_id}/?limit={batch}"
+                    if cursor:
+                        url += f"&cursor={cursor}"
+                    res = cl.private_request(url)
+                    th = res.get("thread", {})
+                    items = th.get("items", [])
+                    if not items:
+                        break
+
+                    for item in items:
+                        scanned += 1
+                        if is_reel(item):
+                            if str(item.get("user_id", "")) == my_pk:
+                                sent += 1
+                            else:
+                                rcvd += 1
+
+                    cursor = th.get("oldest_cursor")
+                    if not cursor or not th.get("has_older"):
+                        break
+                    time.sleep(0.15)
             except Exception:
                 pass
 
