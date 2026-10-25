@@ -27,6 +27,24 @@
 
 ---
 
+### ⚡ 1-Line Quick Install
+
+Paste this into your terminal to install dependencies, fetch the project, and launch instantly:
+
+**Windows (PowerShell):**
+```powershell
+irm https://raw.githubusercontent.com/prashanth-karanam/instagram-reel-counter/main/install.ps1 | iex
+```
+
+**macOS / Linux (Bash):**
+```bash
+curl -sSL https://raw.githubusercontent.com/prashanth-karanam/instagram-reel-counter/main/install.sh | bash
+```
+
+*(No Git required. The installer auto-extracts and runs on Python 3.10+).*
+
+---
+
 ### Settle The Debate Once And For All
 
 We all have that one friend where 90% of the conversation is just sending Instagram Reels back and forth. 
@@ -98,24 +116,18 @@ Hour Range       Reels Count   Activity Bar
 
 ---
 
-### Quick Start
+### Manual Setup
 
-#### Windows (1-Click)
-Double-click `run.bat` or run:
-```cmd
-run.bat
-```
+If you prefer to clone and run manually:
 
-#### Manual Run (Windows, macOS, Linux)
-Install the dependencies:
 ```bash
-pip install instagrapi rich requests
-```
-
-Launch the engine:
-```bash
+git clone https://github.com/prashanth-karanam/instagram-reel-counter.git
+cd instagram-reel-counter
+pip install -r requirements.txt
 python app.py
 ```
+
+On Windows, you can also double-click `run.bat`.
 
 To switch accounts or purge your local session, choose option 5 in the menu or delete `~/.ig_toolkit/session.json`.
 
