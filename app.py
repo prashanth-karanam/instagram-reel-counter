@@ -171,14 +171,17 @@ def is_reel(item: dict) -> bool:
         xma_list = item.get("xma_media_share") or item.get("xma") or []
         if isinstance(xma_list, list) and xma_list:
             x0 = xma_list[0]
+            # Detect playable video streams or video codecs in feed shares
+            if x0.get("playable_url") or x0.get("video_dash_manifest") or x0.get("video_codec"):
+                return True
             target = str(x0.get("target_url", "")).lower()
-            if "/reel/" in target or "/reels/" in target:
+            if "/reel/" in target or "/reels/" in target or "clips_chaining" in target:
                 return True
             prod_type = str(x0.get("product_type", "")).lower()
             if "clip" in prod_type or "reel" in prod_type:
                 return True
         media = item.get("media_share") or item.get("clip") or {}
-        if media.get("media_type") == 2 and (media.get("product_type") == "clips" or "/reel/" in str(media.get("code", "")).lower()):
+        if media.get("media_type") == 2:  # media_type 2 is video/clip
             return True
         if "/reel/" in str(item.get("target_url", "")).lower():
             return True
@@ -285,12 +288,12 @@ def fast_single_chat_counter(cl: Client):
                 if max_amount and total_messages >= max_amount:
                     break
                 batch_size = 100 if scan_all else min(100, max_amount - total_messages)
-                url = f"direct_v2/threads/{thread_id}/?limit={batch_size}"
+                params = {"direction": "older", "limit": str(batch_size)}
                 if cursor:
-                    url += f"&cursor={cursor}"
+                    params["cursor"] = str(cursor)
 
                 try:
-                    res = cl.private_request(url)
+                    res = cl.private_request(f"direct_v2/threads/{thread_id}/", params=params)
                     th = res.get("thread", {})
                     items = th.get("items", [])
                     if not items:
@@ -318,9 +321,9 @@ def fast_single_chat_counter(cl: Client):
                         progress.update(task, completed=total_messages)
 
                     cursor = th.get("oldest_cursor")
-                    if not cursor or not th.get("has_older"):
+                    if not cursor:
                         break
-                    time.sleep(0.2)
+                    time.sleep(0.15)
                 except Exception as e:
                     console.print(f"[dim yellow]Warning: {e}[/dim yellow]")
                     break
@@ -426,10 +429,11 @@ def fast_inbox_leaderboard(cl: Client):
                         if msgs_per_thread and scanned >= msgs_per_thread:
                             break
                         batch = 100 if scan_all else min(100, msgs_per_thread - scanned)
-                        url = f"direct_v2/threads/{t_id}/?limit={batch}"
+                        params = {"direction": "older", "limit": str(batch)}
                         if cursor:
-                            url += f"&cursor={cursor}"
-                        res = cl.private_request(url)
+                            params["cursor"] = str(cursor)
+
+                        res = cl.private_request(f"direct_v2/threads/{t_id}/", params=params)
                         th = res.get("thread", {})
                         items = th.get("items", [])
                         if not items:
@@ -449,9 +453,9 @@ def fast_inbox_leaderboard(cl: Client):
                         )
 
                         cursor = th.get("oldest_cursor")
-                        if not cursor or not th.get("has_older"):
+                        if not cursor:
                             break
-                        time.sleep(0.18)
+                        time.sleep(0.12)
                 except Exception:
                     pass
 
