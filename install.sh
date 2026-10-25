@@ -14,26 +14,44 @@ else
     exit 1
 fi
 
-# Clone or download
-if [ -d "$TARGET_DIR/.git" ]; then
+NEEDS_FETCH=true
+
+if [ -d "$TARGET_DIR/.git" ] && [ -f "$TARGET_DIR/app.py" ]; then
     cd "$TARGET_DIR"
     command -v git >/dev/null 2>&1 && git pull --quiet || true
-elif command -v git >/dev/null 2>&1; then
-    echo "📥 Cloning repository..."
-    git clone --quiet https://github.com/prashanth-karanam/instagram-reel-counter.git "$TARGET_DIR"
-    cd "$TARGET_DIR"
-else
-    echo "📥 Fetching archive..."
-    mkdir -p "$TARGET_DIR"
-    curl -sSL https://github.com/prashanth-karanam/instagram-reel-counter/archive/refs/heads/main.tar.gz | tar -xz -C "$TARGET_DIR" --strip-components=1
-    cd "$TARGET_DIR"
+    NEEDS_FETCH=false
+elif [ -d "$TARGET_DIR" ] && [ ! -f "$TARGET_DIR/app.py" ]; then
+    rm -rf "$TARGET_DIR"
 fi
+
+if [ "$NEEDS_FETCH" = true ]; then
+    CLONED=false
+    if command -v git >/dev/null 2>&1; then
+        echo "📥 Cloning repository..."
+        if git clone --quiet https://github.com/prashanth-karanam/instagram-reel-counter.git "$TARGET_DIR" 2>/dev/null; then
+            CLONED=true
+        fi
+    fi
+
+    if [ "$CLONED" = false ]; then
+        echo "📥 Fetching archive..."
+        mkdir -p "$TARGET_DIR"
+        curl -sSL https://github.com/prashanth-karanam/instagram-reel-counter/archive/refs/heads/main.tar.gz | tar -xz -C "$TARGET_DIR" --strip-components=1
+    fi
+fi
+
+if [ ! -f "$TARGET_DIR/app.py" ]; then
+    echo "❌ Error: Could not locate app.py in $TARGET_DIR"
+    exit 1
+fi
+
+cd "$TARGET_DIR"
 
 # Dependencies
 echo "📦 Installing dependencies..."
 $PY_CMD -m pip install --quiet --upgrade pip || true
-$PY_CMD -m pip install --quiet -r requirements.txt
+$PY_CMD -m pip install --quiet instagrapi rich requests
 
 # Launch
 echo "🚀 Launching toolkit..."
-$PY_CMD app.py
+$PY_CMD "$TARGET_DIR/app.py"

@@ -1,8 +1,9 @@
 # Instagram Reel Counter 1-Line Installer for Windows
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"
 $TargetDir = "$HOME\instagram-reel-counter"
 
-Write-Host "`n⚡ Installing Instagram Reel Counter..." -ForegroundColor Cyan
+Write-Host ""
+Write-Host "[*] Installing Instagram Reel Counter..." -ForegroundColor Cyan
 
 # 1. Verify Python availability
 $PythonCmd = $null
@@ -18,33 +19,66 @@ if (-not $PythonCmd) {
     exit 1
 }
 
-# 2. Clone repository or download archive
+# 2. Resilient Repository Fetching
+$NeedsFetch = $true
+
 if (Test-Path "$TargetDir\.git") {
-    Set-Location $TargetDir
-    if (Get-Command git -ErrorAction SilentlyContinue) {
-        git pull --quiet
+    if (Test-Path "$TargetDir\app.py") {
+        Set-Location $TargetDir
+        if (Get-Command git -ErrorAction SilentlyContinue) {
+            git fetch origin main --quiet 2>$null
+            git reset --hard origin/main --quiet 2>$null
+        }
+        $NeedsFetch = $false
+    } else {
+        Remove-Item -Path $TargetDir -Recurse -Force -ErrorAction SilentlyContinue
     }
-} elseif (Get-Command git -ErrorAction SilentlyContinue) {
-    Write-Host "📥 Cloning repository..." -ForegroundColor Cyan
-    git clone --quiet https://github.com/prashanth-karanam/instagram-reel-counter.git $TargetDir
-    Set-Location $TargetDir
-} else {
-    Write-Host "📥 Fetching archive from GitHub..." -ForegroundColor Cyan
-    New-Item -ItemType Directory -Force -Path $TargetDir | Out-Null
-    $ZipPath = "$env:TEMP\ig_counter_temp.zip"
-    $ExtractPath = "$env:TEMP\ig_counter_temp_extract"
-    Invoke-WebRequest -Uri "https://github.com/prashanth-karanam/instagram-reel-counter/archive/refs/heads/main.zip" -OutFile $ZipPath
-    Expand-Archive -Path $ZipPath -DestinationPath $ExtractPath -Force
-    Copy-Item -Path "$ExtractPath\instagram-reel-counter-main\*" -Destination $TargetDir -Recurse -Force
-    Remove-Item -Path $ZipPath, $ExtractPath -Recurse -Force
-    Set-Location $TargetDir
+} elseif (Test-Path $TargetDir) {
+    if (-not (Test-Path "$TargetDir\app.py")) {
+        Remove-Item -Path $TargetDir -Recurse -Force -ErrorAction SilentlyContinue
+    } else {
+        $NeedsFetch = $false
+    }
 }
 
+if ($NeedsFetch) {
+    $Cloned = $false
+    if (Get-Command git -ErrorAction SilentlyContinue) {
+        Write-Host "[*] Cloning repository..." -ForegroundColor Cyan
+        git clone --quiet https://github.com/prashanth-karanam/instagram-reel-counter.git $TargetDir 2>$null
+        if ((Test-Path "$TargetDir\app.py") -and ($LASTEXITCODE -eq 0)) {
+            $Cloned = $true
+        }
+    }
+
+    # Fallback to direct GitHub zip if git failed or is not available
+    if (-not $Cloned) {
+        Write-Host "[*] Fetching archive from GitHub..." -ForegroundColor Cyan
+        New-Item -ItemType Directory -Force -Path $TargetDir | Out-Null
+        $ZipPath = "$env:TEMP\ig_counter_temp_$PID.zip"
+        $ExtractPath = "$env:TEMP\ig_counter_temp_extract_$PID"
+        Remove-Item -Path $ZipPath, $ExtractPath -Recurse -Force -ErrorAction SilentlyContinue
+        Invoke-WebRequest -Uri "https://github.com/prashanth-karanam/instagram-reel-counter/archive/refs/heads/main.zip" -OutFile $ZipPath -UseBasicParsing
+        Expand-Archive -Path $ZipPath -DestinationPath $ExtractPath -Force
+        Copy-Item -Path "$ExtractPath\instagram-reel-counter-main\*" -Destination $TargetDir -Recurse -Force
+        Remove-Item -Path $ZipPath, $ExtractPath -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+# Final existence check
+if (-not (Test-Path "$TargetDir\app.py")) {
+    Write-Host "[!] Error: Failed to setup application files in $TargetDir" -ForegroundColor Red
+    exit 1
+}
+
+Set-Location $TargetDir
+
 # 3. Install dependencies
-Write-Host "📦 Ensuring dependencies (instagrapi, rich, requests)..." -ForegroundColor Yellow
-& $PythonCmd -m pip install --quiet --upgrade pip
-& $PythonCmd -m pip install --quiet -r requirements.txt
+Write-Host "[*] Ensuring dependencies (instagrapi, rich, requests)..." -ForegroundColor Yellow
+& $PythonCmd -m pip install --quiet --upgrade pip 2>$null
+& $PythonCmd -m pip install --quiet instagrapi rich requests
 
 # 4. Launch Application
-Write-Host "🚀 Launching toolkit...`n" -ForegroundColor Green
-& $PythonCmd app.py
+Write-Host "[+] Launching toolkit..." -ForegroundColor Green
+Write-Host ""
+& $PythonCmd "$TargetDir\app.py"
