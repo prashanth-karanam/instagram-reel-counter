@@ -5,7 +5,7 @@ import time
 import json
 import datetime
 from pathlib import Path
-from collections import defaultdict
+from collections import defaultdict, Counter
 from getpass import getpass
 
 # ---------------------------------------------------------
@@ -186,6 +186,12 @@ def is_reel(item: dict) -> bool:
         if "/reel/" in str(item.get("target_url", "")).lower():
             return True
     return False
+
+
+def make_ascii_bar(ratio: float, length: int = 20) -> str:
+    filled = int(round(ratio * length))
+    filled = max(0, min(length, filled))
+    return "█" * filled + "░" * (length - filled)
 
 
 def compute_streak(dates_set) -> int:
