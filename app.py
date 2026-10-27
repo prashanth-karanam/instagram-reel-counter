@@ -188,10 +188,45 @@ def is_reel(item: dict) -> bool:
     return False
 
 
-def make_ascii_bar(ratio: float, length: int = 20) -> str:
-    filled = int(round(ratio * length))
-    filled = max(0, min(length, filled))
-    return "█" * filled + "░" * (length - filled)
+def compute_streak(dates_set) -> int:
+    if not dates_set:
+        return 0
+    try:
+        sorted_dates = sorted([datetime.datetime.strptime(d, "%Y-%m-%d").date() for d in dates_set])
+        longest = 1
+        current = 1
+        for i in range(1, len(sorted_dates)):
+            diff = (sorted_dates[i] - sorted_dates[i-1]).days
+            if diff == 1:
+                current += 1
+                if current > longest:
+                    longest = current
+            elif diff > 1:
+                current = 1
+        return longest
+    except Exception:
+        return 1
+
+
+def get_archetype(sent_ratio: float, night_owl_pct: float, streak: int) -> tuple[str, str]:
+    if sent_ratio >= 0.65:
+        title = "The Content Broadcaster 📢"
+        desc = "You carry the conversation. You send over 65% of the reels while they watch."
+    elif sent_ratio <= 0.35:
+        title = "The Content Consumer 🍿"
+        desc = "They feed you content non-stop. You sit back and enjoy the show."
+    else:
+        title = "Reel Soulmates ☯️"
+        desc = "Balanced dynamic. You trade brainrot back and forth in near-perfect sync."
+
+    badges = []
+    if night_owl_pct >= 20.0:
+        badges.append("🌙 Midnight Gremlins (20%+ sent after midnight)")
+    if streak >= 7:
+        badges.append(f"🔥 Addicted Streak ({streak} days in a row)")
+
+    full_desc = desc + (" | " + " • ".join(badges) if badges else "")
+    return title, full_desc
 
 
 def get_thread_display_name(t: dict) -> str:
@@ -270,7 +305,12 @@ def fast_single_chat_counter(cl: Client):
     reels_sent = 0
     reels_rcvd = 0
     hourly_distribution = defaultdict(int)
+    daily_distribution = defaultdict(int)
+    day_of_week_distribution = defaultdict(int)
+    creator_counter = Counter()
     total_messages = 0
+    earliest_date = None
+    latest_date = None
 
     interrupted = False
     with Progress(
@@ -311,6 +351,22 @@ def fast_single_chat_counter(cl: Client):
                             else:
                                 reels_rcvd += 1
                             hourly_distribution[ts.hour] += 1
+                            d_str = ts.strftime("%Y-%m-%d")
+                            daily_distribution[d_str] += 1
+                            day_of_week_distribution[ts.strftime("%A")] += 1
+
+                            if not latest_date or ts > latest_date:
+                                latest_date = ts
+                            if not earliest_date or ts < earliest_date:
+                                earliest_date = ts
+
+                            for k in ["xma_clip", "xma_media_share"]:
+                                xl = item.get(k) or []
+                                if isinstance(xl, list) and xl:
+                                    c = xl[0].get("header_title_text")
+                                    if c and not str(c).startswith("http") and len(str(c)) < 32:
+                                        creator_counter[str(c)] += 1
+                                        break
 
                     if scan_all:
                         progress.update(
@@ -329,48 +385,118 @@ def fast_single_chat_counter(cl: Client):
                     break
         except (KeyboardInterrupt, EOFError):
             interrupted = True
-            console.print("\n[yellow][!] Scan paused by user. Showing results scanned so far...[/yellow]")
+            console.print("\n[yellow][!] Scan paused by user. Compiling dossier with data gathered so far...[/yellow]")
 
     total_reels = reels_sent + reels_rcvd
-    status_label = "Complete history parsed" if (scan_all and not interrupted) else "Scan finished"
+    if total_reels == 0:
+        console.print(f"\n[yellow]No reels detected in {total_messages:,} messages checked.[/yellow]")
+        Prompt.ask("\nPress Enter to return")
+        return
+
+    status_label = "Complete history analyzed" if (scan_all and not interrupted) else "Scan finished"
     console.print(f"\n[bold green]✔ {status_label}: {total_messages:,} messages checked ({total_reels:,} reels found)![/bold green]\n")
 
-    sent_ratio = (reels_sent / total_reels) if total_reels > 0 else 0.5
-    rcvd_ratio = 1.0 - sent_ratio
+    # Analytics Computation
+    sent_ratio = reels_sent / total_reels
+    rcvd_ratio = reels_rcvd / total_reels
+    active_days = len(daily_distribution)
+    longest_streak = compute_streak(daily_distribution.keys())
+    record_day, record_count = max(daily_distribution.items(), key=lambda x: x[1]) if daily_distribution else ("N/A", 0)
+    night_owl_reels = sum(hourly_distribution[h] for h in range(0, 5))
+    night_owl_pct = (night_owl_reels / total_reels * 100)
+    est_watch_hours = (total_reels * 30) / 3600
+    archetype_title, archetype_desc = get_archetype(sent_ratio, night_owl_pct, longest_streak)
 
-    if reels_sent > reels_rcvd:
-        verdict = f"You send more reels ({reels_sent} vs {reels_rcvd})"
-    elif reels_rcvd > reels_sent:
-        verdict = f"They send more reels ({reels_rcvd} vs {reels_sent})"
-    else:
-        verdict = "Even distribution"
-
-    summary_content = (
-        f"Thread: {chat_title}\n"
-        f"Total Reels: {total_reels:,}\n\n"
-        f"You Sent:    {reels_sent:,} ({sent_ratio*100:.1f}%)  [{make_ascii_bar(sent_ratio, 20)}]\n"
-        f"They Sent:   {reels_rcvd:,} ({rcvd_ratio*100:.1f}%)  [{make_ascii_bar(rcvd_ratio, 20)}]\n\n"
-        f"Result: {verdict}"
+    # 1. Main Dossier Wrapped Card
+    time_span_str = f"{earliest_date.strftime('%b %d, %Y')} ➔ {latest_date.strftime('%b %d, %Y')}" if (earliest_date and latest_date) else "Unknown"
+    dossier_text = (
+        f"[bold white]Conversation:[/bold white] [bold cyan]{chat_title}[/bold cyan]\n"
+        f"[bold white]Timeline:[/bold white]     {time_span_str} ([bold yellow]{active_days:,}[/bold yellow] active sharing days)\n"
+        f"[bold white]Total Reels:[/bold white]  [bold yellow]{total_reels:,}[/bold yellow] (≈ [bold green]{est_watch_hours:.1f} hours[/bold green] of watch time)\n"
+        f"[bold white]Velocity:[/bold white]     [bold white]{total_reels / max(1, active_days):.1f}[/bold white] reels per active day\n\n"
+        f"[bold white]Dynamic:[/bold white]      [bold yellow]{archetype_title}[/bold yellow]\n"
+        f"[dim]{archetype_desc}[/dim]"
     )
-    console.print(Panel(summary_content, title="Reel Exchange Metrics", border_style="cyan"))
+    console.print(Panel(dossier_text, title="🎬 REEL WRAPPED & FRIENDSHIP DOSSIER", border_style="cyan"))
 
+    # 2. Power Balance
+    balance_text = (
+        f"[bold cyan]You Sent:[/bold cyan]   {reels_sent:,} ({sent_ratio*100:.1f}%)  [{make_ascii_bar(sent_ratio, 22)}]\n"
+        f"[bold magenta]They Sent:[/bold magenta]  {reels_rcvd:,} ({rcvd_ratio*100:.1f}%)  [{make_ascii_bar(rcvd_ratio, 22)}]"
+    )
+    console.print(Panel(balance_text, title="⚖️ Power Balance", border_style="magenta"))
+
+    # 3. Hall of Fame Records
+    rec_table = Table(title="🏆 Hall of Fame Records", box=box.ROUNDED)
+    rec_table.add_column("Achievement / Metric", style="bold white")
+    rec_table.add_column("Score", style="bold yellow")
+    rec_table.add_column("Context", style="dim")
+
+    rec_table.add_row("Longest Daily Streak", f"{longest_streak} consecutive days", "Non-stop daily reel exchange")
+    rec_table.add_row("All-Time Craziest Day", f"{record_count} reels", f"Record set on {record_day}")
+    rec_table.add_row("3 AM Night Owl Club", f"{night_owl_reels:,} reels ({night_owl_pct:.1f}%)", "Exchanged between 00:00 and 05:00")
+    console.print(rec_table)
+
+    # 4. Top Shared Creators
+    top_creators = creator_counter.most_common(5)
+    if top_creators:
+        c_table = Table(title="👑 Top Shared Creators & Pages", box=box.ROUNDED)
+        c_table.add_column("Rank", justify="center", width=5)
+        c_table.add_column("Creator / Page", style="bold cyan")
+        c_table.add_column("Reels Shared", justify="right", style="bold white")
+        c_table.add_column("Share %", justify="right", style="green")
+
+        for r_idx, (c_name, c_cnt) in enumerate(top_creators, 1):
+            c_table.add_row(str(r_idx), f"@{c_name}", f"{c_cnt:,}", f"{c_cnt/total_reels*100:.1f}%")
+        console.print(c_table)
+
+    # 5. Day of Week Distribution
+    dow_order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    dow_table = Table(title="📅 Weekly Rhythm (Day of Week)", box=box.SIMPLE)
+    dow_table.add_column("Day", style="cyan")
+    dow_table.add_column("Reels", justify="right")
+    dow_table.add_column("Activity Bar", style="green")
+
+    max_dow = max(day_of_week_distribution.values()) or 1
+    for d_name in dow_order:
+        d_cnt = day_of_week_distribution.get(d_name, 0)
+        if d_cnt > 0:
+            dow_table.add_row(d_name, str(d_cnt), make_ascii_bar(d_cnt / max_dow, 16))
+    console.print(dow_table)
+
+    # 6. Peak 24-Hour Diurnal Clock
     if hourly_distribution:
         peak_hour = max(hourly_distribution.items(), key=lambda x: x[1])[0]
-        console.print(f"\nPeak Hour: {peak_hour:02d}:00 to {(peak_hour+1)%24:02d}:00")
+        console.print(f"\n[bold white]⏰ Peak Sharing Window:[/bold white] [bold yellow]{peak_hour:02d}:00 to {(peak_hour+1)%24:02d}:00[/bold yellow]\n")
 
-        hour_table = Table(title="Activity Distribution (24h)", box=box.SIMPLE)
-        hour_table.add_column("Hour", style="cyan")
-        hour_table.add_column("Volume", justify="right")
-        hour_table.add_column("Graph", style="green")
-
-        max_h = max(hourly_distribution.values()) or 1
-        for h in range(24):
-            count = hourly_distribution.get(h, 0)
-            if count > 0:
-                hour_table.add_row(f"{h:02d}:00", str(count), make_ascii_bar(count / max_h, 15))
-        console.print(hour_table)
-
-    Prompt.ask("\nPress Enter to return")
+    # Export Action
+    export_choice = Prompt.ask("Actions: [bold green][S][/bold green] Save Shareable Card | [Enter] Back to Menu", default="").strip().lower()
+    if export_choice in ("s", "save", "export"):
+        safe_name = "".join(ch for ch in chat_title if ch.isalnum() or ch in ("_", "-")).strip() or "friend"
+        filename = f"reel_wrapped_{safe_name}.txt"
+        card_content = (
+            f"🎬 INSTAGRAM REEL WRAPPED with {chat_title}\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"Total Reels Exchanged: {total_reels:,} (~{est_watch_hours:.1f} hours of watch time)\n\n"
+            f"• You Sent:   {reels_sent:,} ({sent_ratio*100:.1f}%)\n"
+            f"• They Sent:  {reels_rcvd:,} ({rcvd_ratio*100:.1f}%)\n"
+            f"• Verdict:    {archetype_title}\n\n"
+            f"🏆 HIGHLIGHTS:\n"
+            f"• Timeline:         {time_span_str}\n"
+            f"• Longest Streak:   {longest_streak} days in a row\n"
+            f"• Record Binge Day: {record_count} reels on {record_day}\n"
+            f"• Night Owl Reels:  {night_owl_reels:,} ({night_owl_pct:.1f}% sent after midnight)\n"
+        )
+        if top_creators:
+            card_content += "\n👑 TOP CREATORS:\n"
+            for r_idx, (c_name, c_cnt) in enumerate(top_creators, 1):
+                card_content += f"{r_idx}. @{c_name} ({c_cnt} reels)\n"
+        try:
+            Path(filename).write_text(card_content, encoding="utf-8")
+            console.print(f"[bold green]✔ Saved shareable card to: {Path(filename).resolve()}[/bold green]")
+            Prompt.ask("\nPress Enter to return")
+        except Exception as e:
+            console.print(f"[red]Error saving file: {e}[/red]")
 
 # ---------------------------------------------------------
 # Feature 2: Complete Inbox Leaderboard
