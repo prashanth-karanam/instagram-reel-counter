@@ -7,7 +7,10 @@
 [![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![Storage](https://img.shields.io/badge/Cloud_Servers-ZERO-00C853?style=for-the-badge)](https://github.com/prashanth-karanam/instagram-reel-counter)
 [![Privacy](https://img.shields.io/badge/Privacy-100%25_Local-blueviolet?style=for-the-badge)](https://github.com/prashanth-karanam/instagram-reel-counter)
+[![Web App](https://img.shields.io/badge/Web_UI-Live_Demo-E1306C?style=for-the-badge&logo=googlechrome&logoColor=white)](https://prashanth-karanam.github.io/reel-wrapped/)
 [![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](LICENSE)
+
+> ?? **New Web App:** Experience the full mobile analytics UI & 9:16 Story generator live at [**prashanth-karanam.github.io/reel-wrapped**](https://prashanth-karanam.github.io/reel-wrapped/)! Source repo: [**github.com/prashanth-karanam/reel-wrapped**](https://github.com/prashanth-karanam/reel-wrapped).
 
 <br/>
 
